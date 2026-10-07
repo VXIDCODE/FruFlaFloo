@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Miami Drive</title>
+<style>
+  :root {
+    --ctp-base:#1e1e2e; --ctp-crust:#11111b; --ctp-text:#cdd6f4;
+    --ctp-mauve:#cba6f7; --ctp-sky:#89dceb; --ctp-pink:#f5c2e7;
+    --ctp-blue:#89b4fa; --ctp-green:#a6e3a1; --ctp-overlay0:#6c7086;
+    --ctp-subtext0:#a6adc8; --ctp-surface1:#45475a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%; overflow: hidden;
+    background: var(--ctp-crust);
+    font-family: "JetBrains Mono","Fira Code","SF Mono",Consolas,monospace;
+    color: var(--ctp-text);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ===== корпус монитора ===== */
+  .monitor {
+    position: fixed; inset: 0; z-index: 2;
+    padding: clamp(6px, 1.1vmin, 16px);
+    background: linear-gradient(160deg, #16161e 0%, #0b0b12 45%, #05050a 100%);
+  }
+  .monitor::after {
+    content: '';
+    position: absolute;
+    right: calc(clamp(6px, 1.1vmin, 16px) + 8px);
+    bottom: calc(clamp(6px, 1.1vmin, 16px) / 2);
+    width: 4px; height: 4px; border-radius: 50%;
+    background: var(--ctp-green);
+    box-shadow: 0 0 6px var(--ctp-green), 0 0 14px rgba(166,227,161,0.6);
+  }
+
+  /* ===== экран ===== */
+  .screen {
+    position: relative; width: 100%; height: 100%;
+    border-radius: clamp(4px, 0.7vmin, 12px);
+    overflow: hidden;
+    background: var(--ctp-base);
+    box-shadow:
+      inset 0 0 0 1px rgba(255,255,255,0.05),
+      inset 0 0 120px rgba(0,0,0,0.55);
+  }
+  .screen::before {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, transparent 42%);
+    pointer-events: none; z-index: 6;
+  }
+
+  /* фон под артом — статические градиенты, без фильтров и анимации */
+  .fx {
+    position: absolute; inset: 0; z-index: 1; pointer-events: none;
+    background:
+      radial-gradient(circle at 18% 22%, rgba(203,166,247,0.16), transparent 42%),
+      radial-gradient(circle at 82% 78%, rgba(137,220,235,0.14), transparent 42%),
+      radial-gradient(circle at 55% 50%, rgba(245,194,231,0.08), transparent 45%);
+  }
+
+  .stage { position: absolute; inset: 0; z-index: 5; }
+  #c { display: block; width: 100%; height: 100%; }
+
+  /* ===== CRT-оверлеи — статичные ===== */
+  .crt {
+    position: fixed; inset: 0; z-index: 10; pointer-events: none;
+    background: repeating-linear-gradient(to bottom,
+      rgba(0,0,0,0.18) 0px, rgba(0,0,0,0.18) 1px,
+      transparent 1px, transparent 3px);
+    mix-blend-mode: multiply;
+    opacity: 0.9;
+  }
+  .vignette {
+    position: fixed; inset: 0; z-index: 11; pointer-events: none;
+    background: radial-gradient(ellipse at center,
+      transparent 42%, rgba(0,0,0,0.30) 85%, rgba(0,0,0,0.72) 100%);
+  }
+  .beam {
+    position: fixed; left: 0; right: 0; top: 0; height: 120px;
+    z-index: 12; pointer-events: none;
+    background: linear-gradient(to bottom, transparent,
+      rgba(137,180,250,0.05), rgba(203,166,247,0.09),
+      rgba(137,180,250,0.05), transparent);
+    animation: beamMove 8s linear infinite;
+    will-change: transform;
+  }
+  @keyframes beamMove {
+    0%   { transform: translateY(-30vh); }
+    100% { transform: translateY(130vh); }
+  }
+</style>
+</head>
+<body>
+
+<div class="monitor">
+  <div class="screen" id="screen">
+    <div class="fx"></div>
+    <div class="stage"><canvas id="c"></canvas></div>
+  </div>
+</div>
+
+<div class="crt"></div>
+<div class="vignette"></div>
+<div class="beam"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  var screenEl = document.getElementById('screen');
+  var canvas   = document.getElementById('c');
+  var ctx      = canvas.getContext('2d', { alpha: true, desynchronized: true });
+
+  var FONT = 'monospace';
+
+  /* ---------- палитра Catppuccin Mocha ---------- */
+  var PAL = [
+    '#cdd6f4', /* 0  text      */
+    '#cba6f7', /* 1  mauve     */
+    '#89dceb', /* 2  sky       */
+    '#f5c2e7', /* 3  pink      */
+    '#89b4fa', /* 4  blue      */
+    '#a6e3a1', /* 5  green     */
+    '#6c7086', /* 6  overlay0  */
+    '#a6adc8', /* 7  subtext0  */
+    '#45475a', /* 8  surface1  */
+    '#f9e2af', /* 9  yellow    */
+    '#f38ba8', /* 10 red       */
+    '#94e2d5', /* 11 teal      */
+    '#fab387', /* 12 peach     */
+    '#b4befe', /* 13 lavender  */
+    '#74c7ec', /* 14 sapphire  */
+    '#eba0ac'  /* 15 maroon    */
+  ];
+  var C_TEXT=0, C_MAUVE=1, C_SKY=2, C_PINK=3, C_BLUE=4, C_GREEN=5,
+      C_OVER0=6, C_SUB0=7, C_SURF1=8, C_YELLOW=9, C_RED=10, C_TEAL=11,
+      C_PEACH=12, C_LAV=13, C_SAPP=14, C_MAROON=15;
+
+  var GLYPHS = '!<>-_\\/[]{}=+*^?#@$%&0123456789ABCDEF'.split('');
+
+  /* ---------- сетка ---------- */
+  var W = 0, H = 0, dpr = 1;
+  var cols = 0, rows = 0, charW = 12, charH = 20, fontSize = 20, charRatio = 0.6;
+  var originX = 0, originY = 0;
+  var horizon = 0, cx = 0;
+  var chBuf = null, colBuf = null;
+  var stars = [];
+  var clouds = [];
+
+  /* ---------- цикл ---------- */
+  var running = false, rafId = null, startTime = 0;
+
+  /* ---------- глитч ---------- */
+  var glitchUntil = 0, nextGlitchAt = 0, glitchRefresh = 0, flashAlpha = 0;
+  var rowOffX = null, rowOffY = null, rowTint = null;
+  var corruptMap = new Map();
+
+  /* ---------- автомобиль ---------- */
+  var CAR = [
+    '        __-------__',
+    '      / _---------_ \\',
+    '     / /           \\ \\',
+    '     |_|___________|_|',
+    ' /-\\|                 |/-\\',
+    '| _ |\\       0       /| _ |',
+    '|(_)| \\      !      / |(_)|',
+    '|___|__\\_____!_____/__|___|',
+    '[_________|28_08|_________] ',
+    ' ||||     ~~~~~~~     ||||',
+    " `--'                 `--'"
+  ];
+
+  /* ---------- облака (ASCII-спрайты) ---------- */
+  var CLOUDS = [
+    [
+      "                _",
+      "              (`  ).                   _",
+      "             (     ).              .:(`  )`.",
+      "            _(       '`.          :(   .    )",
+      "        .=(`(      .   )     .--  `.  (    ) )",
+      "       ((    (..__.:'-'   .+(   )   ` _`  ) )",
+      "       `(       ) )       (   .  )     (   )  ._",
+      "         ` __.:'   )     (   (   ))     `-'.-(`  )",
+      "      ( )       --'       `- __.'         :(      ))",
+      "     (_.'          .')                    `(    )  ))",
+      "                  (_  )                     ` __.:'"
+    ],
+    [
+      "          ___",
+      "       .-(   )-.",
+      "      (    .    )",
+      "     (__..___..__)",
+      "       `--...--'"
+    ],
+    [
+      "    ___",
+      "  _(   )_",
+      " (__._.__)",
+      "   `---'"
+    ]
+  ];
+
+  /* ============================================================
+     утилиты
+     ============================================================ */
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+
+  function hash(n) {
+    var x = Math.imul(n ^ (n >>> 15), 2246822507) ^ Math.imul(n ^ (n >>> 13), 3266489909);
+    x = (x ^ (x >>> 16)) >>> 0;
+    return x / 4294967296;
+  }
+
+  function put(c, r, ch, col) {
+    if (c < 0 || c >= cols || r < 0 || r >= rows) return;
+    var i = r * cols + c;
+    chBuf[i] = ch;
+    colBuf[i] = col;
+  }
+
+  function measureRatio() {
+    var c = document.createElement('canvas');
+    var g = c.getContext('2d');
+    g.font = '100px ' + FONT;
+    return (g.measureText('M').width / 100) || 0.6;
+  }
+
+  /* ============================================================
+     layout / resize
+     ============================================================ */
+  function layout() {
+    fontSize = clamp(H / 44, 6, 28);
+    charW = fontSize * charRatio;
+    charH = fontSize;
+
+    cols = Math.max(12, Math.floor(W / charW));
+    rows = Math.max(10, Math.floor(H / charH));
+
+    originX = Math.round((W - cols * charW) * 0.5);
+    originY = Math.round((H - rows * charH) * 0.5);
+
+    chBuf = new Array(cols * rows).fill(' ');
+    colBuf = new Int16Array(cols * rows);
+
+    horizon = Math.floor(rows * 0.58);
+    cx = Math.floor(cols / 2);
+
+    corruptMap.clear();
+    rowOffX = null; rowOffY = null; rowTint = null;
+
+    /* звёзды */
+    stars = [];
+    var n = Math.floor(cols * horizon * 0.006);
+    for (var i = 0; i < n; i++) {
+      stars.push({
+        c: (Math.random() * cols) | 0,
+        r: (Math.random() * horizon * 0.9) | 0,
+        p: Math.random() * 6.283,
+        s: 0.5 + Math.random() * 1.6
+      });
+    }
+
+    /* облака */
+    clouds = [];
+    var nc = 2 + Math.floor(Math.random() * 3);
+    for (var j = 0; j < nc; j++) {
+      var si = (Math.random() * CLOUDS.length) | 0;
+      var spr = CLOUDS[si];
+      var cw = 0;
+      for (var k = 0; k < spr.length; k++) {
+        if (spr[k].length > cw) cw = spr[k].length;
+      }
+      var maxY = Math.max(0, horizon - spr.length - 1);
+      clouds.push({
+        sp: spr,
+        w: cw,
+        x: Math.random() * (cols + cw + 20),
+        y: Math.floor(Math.random() * (maxY + 1)),
+        v: 0.004 + Math.random() * 0.010,
+        ph: Math.random() * 6.283
+      });
+    }
+  }
+
+  function resize() {
+    var rect = screenEl.getBoundingClientRect();
+    W = Math.max(1, rect.width);
+    H = Math.max(1, rect.height);
+
+    layout();
+
+    var baseDpr = window.devicePixelRatio || 1;
+    var cap = 1.25;
+    var cells = cols * rows;
+    if (cells > 2600) cap = 1.0;
+    if (cells > 5200) cap = 0.85;
+    dpr = Math.min(baseDpr, cap);
+
+    canvas.width  = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    canvas.style.width  = W + 'px';
+    canvas.style.height = H + 'px';
+  }
+
+  /* ============================================================
+     слои сцены
+     ============================================================ */
+
+  /* ---------- звёзды ---------- */
+  function drawSky(t) {
+    for (var i = 0; i < stars.length; i++) {
+      var s = stars[i];
+      var tw = 0.5 + 0.5 * Math.sin(t * 0.0016 * s.s + s.p);
+      if (tw > 0.78) put(s.c, s.r, '.', C_SUB0);
+      else if (tw > 0.34) put(s.c, s.r, '.', C_OVER0);
+    }
+  }
+
+  /* ---------- облака ---------- */
+  function drawClouds(t) {
+    for (var i = 0; i < clouds.length; i++) {
+      var cl = clouds[i];
+      var spr = cl.sp;
+
+      var total = cols + cl.w + 20;
+      var x = cl.x - t * cl.v;
+      x = x % total;
+      if (x < 0) x += total;
+      x = Math.round(x - cl.w - 10);
+
+      var yOff = Math.round(Math.sin(t * 0.0005 + cl.ph) * 0.8);
+
+      for (var r = 0; r < spr.length; r++) {
+        var line = spr[r];
+        var yy = cl.y + r + yOff;
+        if (yy < 0 || yy >= horizon) continue;
+
+        for (var k = 0; k < line.length; k++) {
+          var ch = line.charAt(k);
+          if (ch === ' ') continue;
+          var isEdge = (ch === '(' || ch === ')' || ch === '`' || ch === "'");
+          put(x + k, yy, ch, isEdge ? C_SUB0 : C_OVER0);
+        }
+      }
+    }
+  }
+
+  /* ---------- солнце ---------- */
+  function drawSun(t) {
+    var sunR = Math.min(rows * 0.30, cols * charRatio * 0.24);
+    var sunCy = horizon - sunR * 0.30;
+    var sunCx = cx;
+
+    var top = Math.max(0, Math.floor(sunCy - sunR));
+    var bot = Math.min(horizon, Math.ceil(sunCy + sunR));
+
+    for (var r = top; r <= bot; r++) {
+      var dy = r - sunCy;
+
+      if (dy > 0) {
+        var period = 3.0;
+        var f = (dy % period) / period;
+        var gap = 0.12 + (dy / sunR) * 0.55;
+        if (f < gap) continue;
+      }
+
+      var u = (dy + sunR) / (2 * sunR);
+      var col;
+      if (u < 0.24)      col = C_YELLOW;
+      else if (u < 0.48) col = C_PEACH;
+      else if (u < 0.74) col = C_MAROON;  /* было C_PINK — заменено на maroon */
+      else               col = C_MAUVE;
+
+      var dxMax = Math.sqrt(Math.max(0, sunR * sunR - dy * dy)) / charRatio;
+      var c0 = Math.ceil(sunCx - dxMax);
+      var c1 = Math.floor(sunCx + dxMax);
+      for (var c = c0; c <= c1; c++) put(c, r, '#', col);
+    }
+  }
+
+  /* ---------- силуэт города ---------- */
+  function drawSkyline(t) {
+    var scroll = t * 0.0022;
+    var bw = 5;
+
+    for (var c = 0; c < cols; c++) {
+      var wc = c + scroll;
+      var bi = Math.floor(wc / bw);
+      var local = wc - bi * bw;
+
+      var h = 2 + Math.floor(hash(bi * 13 + 5) * 12);
+      if (local < 1.2 || local > bw - 1.2) {
+        h -= 1 + Math.floor(hash(bi * 13 + 9) * 3);
+      }
+      if (h < 1) h = 1;
+
+      var top = horizon - h;
+      for (var r = top; r <= horizon; r++) {
+        var lit = ((r - top) % 2 === 1) && (Math.floor(wc) % 3 === 1);
+        if (lit && hash(bi * 31 + r * 7) > 0.72) put(c, r, ':', C_YELLOW);
+        else if (lit) put(c, r, ':', C_OVER0);
+        else put(c, r, '#', C_SURF1);
+      }
+
+      if (hash(bi * 57 + 3) > 0.86) put(c, top - 1, '|', C_OVER0);
+    }
+  }
+
+  /* ---------- пальмы ---------- */
+  var PALM = [
+    ' \\   / ',
+    '__\\|/__',
+    ' //o\\\\ ',
+    '   |   ',
+    '   |   ',
+    '   |   ',
+    '   |   '
+  ];
+
+  function drawPalms(t) {
+    var scroll = t * 0.006;
+    var sp = 26;
+    var i0 = Math.floor(scroll / sp) - 1;
+    var i1 = i0 + Math.ceil(cols / sp) + 3;
+    var top = horizon - PALM.length + 1;
+
+    for (var i = i0; i <= i1; i++) {
+      var wx = i * sp + hash(i * 17 + 3) * 16;
+      var c = Math.round(wx - scroll);
+      if (c < -10 || c > cols + 10) continue;
+
+      for (var r = 0; r < PALM.length; r++) {
+        var line = PALM[r];
+        var col;
+        if (r < 2)         col = C_MAUVE;   /* листья */
+        else if (r === 2)  col = C_PEACH;   /* крона  */
+        else               col = C_YELLOW;  /* ствол — выделен, не сливается с фоном */
+        for (var k = 0; k < line.length; k++) {
+          var ch = line.charAt(k);
+          if (ch === ' ') continue;
+          put(c + k, top + r, ch, col);
+        }
+      }
+    }
+  }
+
+  /* ---------- сетка земли ---------- */
+  function drawGround(t) {
+    var span = rows - horizon;
+    if (span <= 1) return;
+    var scroll = t * 0.0044;
+
+    for (var r = horizon + 1; r < rows; r++) {
+      var d = (r - horizon) / span;
+      var w = d * 2.6 + 0.1;
+      var u = 1 / w;
+
+      var ph = u * 1.5 + scroll;
+      var f = ph - Math.floor(ph);
+      var hLine = f < 0.14;
+      var hCol = d < 0.45 ? C_SURF1 : C_OVER0;
+
+      for (var c = 0; c < cols; c++) {
+        if (hLine) {
+          put(c, r, '-', hCol);
+        } else if (w > 0.34) {
+          var sp = w * 4.5;
+          var xw = (c - cx) / sp;
+          if (Math.abs(xw - Math.round(xw)) * sp < 0.45) {
+            put(c, r, '|', C_SURF1);
+          }
+        }
+      }
+    }
+  }
+
+  /* ---------- дорога ---------- */
+  function drawRoad(t) {
+    var span = rows - horizon;
+    if (span <= 1) return;
+    var maxHalf = cols * 0.30;
+    var scroll = t * 0.0044;
+
+    /* вертикальные границы автомобиля — чтобы разметка не просвечивала */
+    var bob = Math.round(Math.sin(t * 0.008) * 0.75);
+    var carTop = rows - CAR.length - 2 + bob - 2;
+    var carBot = rows - CAR.length - 2 + bob + CAR.length + 1;
+
+    for (var r = horizon + 1; r < rows; r++) {
+      var d = (r - horizon) / span;
+      var half = maxHalf * d;
+      var cL = Math.round(cx - half);
+      var cR = Math.round(cx + half);
+
+      /* асфальт — стираем сетку */
+      for (var c = cL; c <= cR; c++) {
+        if (c < 0 || c >= cols) continue;
+        var idx = r * cols + c;
+        chBuf[idx] = ' ';
+        colBuf[idx] = 0;
+      }
+
+      /* обочины */
+      put(cL, r, '/', C_TEXT);
+      put(cR, r, '\\', C_TEXT);
+
+      /* прерывистая осевая — только ДО и ПОСЛЕ автомобиля */
+      if (r < carTop || r > carBot) {
+        var w = d * 2.6 + 0.1;
+        var u = 1 / w;
+        var ph = u * 1.2 + scroll;
+        var f = ph - Math.floor(ph);
+        if (f < 0.5) {
+          var hw = Math.round(d * 2.2);
+          for (var k = -hw; k <= hw; k++) put(cx + k, r, '#', C_YELLOW);
+        }
+      }
+    }
+  }
+
+  /* ---------- автомобиль ---------- */
+  function drawCar(t) {
+    var bob  = Math.round(Math.sin(t * 0.008) * 0.75);
+    var sway = Math.round(Math.sin(t * 0.00045) * 2);
+    var vib  = (Math.random() < 0.07) ? ((Math.random() * 2 - 1) | 0) : 0;
+
+    var maxW = 0;
+    for (var i = 0; i < CAR.length; i++) {
+      if (CAR[i].length > maxW) maxW = CAR[i].length;
+    }
+    var left = cx - Math.floor(maxW / 2) + sway;
+    var top  = rows - CAR.length - 2 + bob + vib;
+
+    for (var r = 0; r < CAR.length; r++) {
+      var line = CAR[r];
+      var col = (r === CAR.length - 1) ? C_TEXT : C_PINK;
+      for (var k = 0; k < line.length; k++) {
+        var ch = line.charAt(k);
+        if (ch === ' ') continue;
+        put(left + k, top + r, ch, col);
+      }
+    }
+
+    /* отблеск стоп-сигналов на асфальте */
+    var glowRow = top + CAR.length;
+    for (var g = -8; g <= 8; g += 2) {
+      put(cx + sway + g, glowRow, '·', C_RED);
+    }
+  }
+
+  /* ============================================================
+     глитч
+     ============================================================ */
+  function updateGlitch(t) {
+    if (t >= nextGlitchAt) {
+      glitchUntil = t + 600 + Math.random() * 900;
+      nextGlitchAt = t + 9000 + Math.random() * 12000;
+      flashAlpha = 0.45;
+      glitchRefresh = -1e9;
+    }
+
+    if (t >= glitchUntil) return;
+    if (t - glitchRefresh < 60) return;
+    glitchRefresh = t;
+
+    if (!rowOffX || rowOffX.length !== rows) {
+      rowOffX = new Float32Array(rows);
+      rowOffY = new Float32Array(rows);
+      rowTint = new Int8Array(rows);
+    }
+
+    for (var r = 0; r < rows; r++) {
+      rowOffX[r] = (Math.random() < 0.35)
+        ? (Math.random() * 2 - 1) * 40
+        : (Math.random() * 2 - 1) * 4;
+      rowOffY[r] = (Math.random() * 2 - 1) * 3;
+      var q = Math.random();
+      rowTint[r] = q < 0.05 ? 1 : q < 0.09 ? 2 : q < 0.12 ? 3 : 0;
+    }
+
+    corruptMap.clear();
+    var n = 6 + ((Math.random() * 20) | 0);
+    for (var k = 0; k < n; k++) {
+      corruptMap.set(
+        (Math.random() * chBuf.length) | 0,
+        GLYPHS[(Math.random() * GLYPHS.length) | 0]
+      );
+    }
+  }
+
+  /* ============================================================
+     рендер буфера
+     ============================================================ */
+  function render(t) {
+    chBuf.fill(' ');
+    colBuf.fill(0);
+
+    drawSky(t);
+    drawSun(t);
+    drawClouds(t);
+    drawSkyline(t);
+    drawPalms(t);
+    drawGround(t);
+    drawRoad(t);
+    drawCar(t);
+  }
+
+  /* ============================================================
+     вывод на canvas
+     ============================================================ */
+  function blit(t) {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+
+    ctx.font = fontSize.toFixed(2) + 'px ' + FONT;
+    ctx.textBaseline = 'top';
+    ctx.textAlign = 'left';
+
+    var glitching = t < glitchUntil && rowOffX && rowOffX.length === rows;
+    var last = -1;
+
+    for (var r = 0; r < rows; r++) {
+      var ox = glitching ? rowOffX[r] : 0;
+      var oy = glitching ? rowOffY[r] : 0;
+      var tint = glitching ? rowTint[r] : 0;
+      var py = originY + r * charH + oy;
+      var base = r * cols;
+
+      for (var c = 0; c < cols; c++) {
+        var i = base + c;
+        var ch = chBuf[i];
+        if (ch === ' ') continue;
+
+        var ci = colBuf[i];
+
+        if (glitching) {
+          var g = corruptMap.get(i);
+          if (g !== undefined) ch = g;
+          if (tint === 1) ci = C_RED;
+          else if (tint === 2) ci = C_TEAL;
+          else if (tint === 3) ci = C_YELLOW;
+        }
+
+        if (ci !== last) { ctx.fillStyle = PAL[ci]; last = ci; }
+        ctx.fillText(ch, originX + c * charW + ox, py);
+      }
+    }
+
+    if (flashAlpha > 0.01) {
+      ctx.fillStyle = 'rgba(200,220,255,' + flashAlpha.toFixed(3) + ')';
+      ctx.fillRect(0, 0, W, H);
+      flashAlpha *= 0.72;
+    } else {
+      flashAlpha = 0;
+    }
+  }
+
+  /* ============================================================
+     цикл
+     ============================================================ */
+  function frame(now) {
+    if (!running) return;
+    if (!startTime) startTime = now;
+
+    var t = now - startTime;
+
+    updateGlitch(t);
+    render(t);
+    blit(t);
+
+    rafId = requestAnimationFrame(frame);
+  }
+
+  /* ============================================================
+     старт
+     ============================================================ */
+  function boot() {
+    charRatio = measureRatio();
+    resize();
+
+    running = true;
+    startTime = 0;
+    nextGlitchAt = 5000 + Math.random() * 5000;
+    glitchUntil = 0;
+
+    rafId = requestAnimationFrame(frame);
+  }
+
+  /* ---- resize (debounce) ---- */
+  var resizeTimer = null;
+  window.addEventListener('resize', function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () {
+      if (!running) return;
+      resize();
+    }, 120);
+  });
+
+  /* ---- пауза во вкладке-фоне ---- */
+  var pauseAt = 0;
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) {
+      running = false;
+      pauseAt = performance.now();
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = null;
+    } else {
+      running = true;
+      if (pauseAt && startTime) startTime += performance.now() - pauseAt;
+      nextGlitchAt = 4000;
+      rafId = requestAnimationFrame(frame);
+    }
+  });
+
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(function () { setTimeout(boot, 50); })
+                      .catch(function () { setTimeout(boot, 50); });
+  } else {
+    setTimeout(boot, 100);
+  }
+})();
+</script>
+</body>
+</html>
