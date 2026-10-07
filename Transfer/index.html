@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Transfer</title>
+<style>
+  :root {
+    --ctp-base:#1e1e2e; --ctp-mantle:#181825; --ctp-crust:#11111b;
+    --ctp-surface0:#313244; --ctp-surface1:#45475a; --ctp-surface2:#585b70;
+    --ctp-overlay0:#6c7086; --ctp-overlay1:#7f849c;
+    --ctp-text:#cdd6f4; --ctp-subtext0:#a6adc8; --ctp-subtext1:#bac2de;
+    --ctp-green:#a6e3a1; --ctp-teal:#94e2d5; --ctp-sky:#89dceb;
+    --ctp-blue:#89b4fa; --ctp-lavender:#b4befe; --ctp-mauve:#cba6f7;
+    --ctp-pink:#f5c2e7; --ctp-red:#f38ba8; --ctp-peach:#fab387; --ctp-yellow:#f9e2af;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%; overflow: hidden; background: var(--ctp-crust);
+    font-family: "JetBrains Mono","Fira Code","SF Mono",Consolas,monospace;
+    color: var(--ctp-text);
+  }
+
+  /* ---------- ФОН ---------- */
+  .bg-layer { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+  .grid {
+    position: absolute; inset: -10%;
+    background-image:
+      linear-gradient(rgba(137,180,250,0.08) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(137,180,250,0.08) 1px, transparent 1px);
+    background-size: 48px 48px;
+    transform: perspective(600px) rotateX(58deg);
+    transform-origin: center bottom;
+    animation: gridScroll 24s linear infinite;
+    mask-image: radial-gradient(ellipse at 50% 60%, #000 10%, transparent 75%);
+    -webkit-mask-image: radial-gradient(ellipse at 50% 60%, #000 10%, transparent 75%);
+  }
+  @keyframes gridScroll {
+    from { background-position: 0 0, 0 0; }
+    to   { background-position: 0 48px, 48px 0; }
+  }
+  .glow { position: absolute; border-radius: 50%; filter: blur(90px); opacity: 0.55; animation: float 18s ease-in-out infinite; }
+  .glow.a { width: 480px; height: 480px; background: var(--ctp-mauve); top: -160px; left: -120px; }
+  .glow.b { width: 420px; height: 420px; background: var(--ctp-sky); bottom: -140px; right: -120px; animation-delay: -6s; }
+  .glow.c { width: 360px; height: 360px; background: var(--ctp-pink); top: 40%; left: 60%; animation-delay: -12s; opacity: 0.35; }
+  @keyframes float {
+    0%,100% { transform: translate(0,0) scale(1); }
+    50%     { transform: translate(40px,-30px) scale(1.15); }
+  }
+  .scanlines-bg {
+    position: absolute; inset: 0;
+    background: repeating-linear-gradient(to bottom,
+      rgba(0,0,0,0.15) 0px, rgba(0,0,0,0.15) 1px,
+      transparent 1px, transparent 3px);
+    opacity: 0.5;
+  }
+  .noise {
+    position: absolute; inset: 0; opacity: 0.06;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    mix-blend-mode: overlay;
+  }
+
+  /* ---------- РАМКА ОКНА ---------- */
+  .stage-wrap {
+    position: relative; z-index: 2;
+    height: 100vh; padding: 4vh 6vw;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .stage-frame {
+    width: 100%; height: 82vh;
+    background: rgba(24,24,37,0.85);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--ctp-surface1);
+    border-radius: 12px;
+    box-shadow:
+      0 0 0 1px rgba(203,166,247,0.15),
+      0 20px 60px rgba(0,0,0,0.6),
+      0 0 80px rgba(137,180,250,0.15),
+      inset 0 0 120px rgba(203,166,247,0.05);
+    display: flex; flex-direction: column;
+    overflow: hidden; position: relative;
+    animation: bootIn 0.8s ease-out;
+  }
+  @keyframes bootIn {
+    from { opacity: 0; transform: scale(0.96) translateY(12px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+  }
+
+  .titlebar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 16px;
+    background: linear-gradient(180deg, var(--ctp-surface0), var(--ctp-mantle));
+    border-bottom: 1px solid var(--ctp-surface1);
+    user-select: none; flex-shrink: 0;
+  }
+  .dots { display: flex; gap: 8px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .dot.r { background: var(--ctp-red); }
+  .dot.y { background: var(--ctp-yellow); }
+  .dot.g { background: var(--ctp-green); }
+
+  .title {
+    flex: 1; text-align: center;
+    color: var(--ctp-subtext0);
+    font-size: 12px; letter-spacing: 0.08em; text-transform: lowercase;
+  }
+  .title .path { color: var(--ctp-mauve); }
+  .title .sep  { color: var(--ctp-overlay0); }
+
+  .status { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ctp-green); letter-spacing: 0.05em; }
+  .status .pulse {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--ctp-green);
+    box-shadow: 0 0 10px var(--ctp-green);
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,100% { opacity: 1; transform: scale(1); }
+    50%     { opacity: 0.4; transform: scale(0.7); }
+  }
+  .status.tx .pulse { background: var(--ctp-yellow); box-shadow: 0 0 10px var(--ctp-yellow); }
+  .status.done .pulse { background: var(--ctp-green); box-shadow: 0 0 10px var(--ctp-green); }
+
+  /* ---------- СЦЕНА ---------- */
+  .stage {
+    flex: 1; position: relative;
+    overflow: hidden;
+    background:
+      radial-gradient(ellipse at 50% 50%, rgba(203,166,247,0.05), transparent 65%),
+      var(--ctp-base);
+  }
+
+  /* Сетка связи между ПК */
+  .link-line {
+    position: absolute;
+    top: 50%; left: 15%; right: 15%;
+    height: 1px;
+    background-image: linear-gradient(90deg,
+      transparent 0%,
+      var(--ctp-surface2) 20%,
+      var(--ctp-surface2) 80%,
+      transparent 100%);
+    transform: translateY(-50%);
+    opacity: 0.5;
+    pointer-events: none;
+  }
+  .link-line::before {
+    content: "";
+    position: absolute; inset: -1px 0;
+    background-image: linear-gradient(90deg,
+      transparent 0%,
+      rgba(203,166,247,0.35) 50%,
+      transparent 100%);
+    background-size: 30% 100%;
+    background-repeat: no-repeat;
+    animation: linkPulse 3.6s linear infinite;
+  }
+  @keyframes linkPulse {
+    from { background-position: -40% 0; }
+    to   { background-position: 140% 0; }
+  }
+
+  /* ---------- ПК ---------- */
+  .pc {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex; flex-direction: column; align-items: center;
+    z-index: 2;
+    --pc-color: var(--ctp-mauve);
+    --pc-color-glow: rgba(203,166,247,0.4);
+  }
+  .pc.left  { left: 6%; }
+  .pc.right { right: 6%; }
+
+  .monitor {
+    width: 250px; height: 172px;
+    background: linear-gradient(180deg, #2a2a3a, #1a1a28);
+    border: 2px solid var(--pc-color);
+    border-radius: 14px;
+    padding: 12px;
+    position: relative;
+    box-shadow:
+      0 0 0 1px rgba(0,0,0,0.4),
+      0 0 34px var(--pc-color-glow),
+      0 14px 40px rgba(0,0,0,0.65),
+      inset 0 1px 0 rgba(255,255,255,0.05);
+    transition: transform 0.25s ease;
+  }
+  .pc.pulse .monitor { animation: pcPulse 0.7s cubic-bezier(.2,.9,.3,1.2); }
+  @keyframes pcPulse {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.055); }
+    100% { transform: scale(1); }
+  }
+
+  .screen {
+    width: 100%; height: 100%;
+    background:
+      radial-gradient(ellipse at 30% 20%, var(--pc-color-glow), transparent 70%),
+      var(--ctp-crust);
+    border-radius: 6px;
+    overflow: hidden;
+    position: relative;
+    border: 1px solid rgba(0,0,0,0.65);
+    box-shadow: inset 0 0 40px rgba(0,0,0,0.6);
+  }
+  .screen::after {
+    content: "";
+    position: absolute; inset: 0;
+    background: repeating-linear-gradient(to bottom,
+      rgba(0,0,0,0.25) 0 1px, transparent 1px 3px);
+    pointer-events: none;
+    opacity: 0.6;
+  }
+
+  .screen-content {
+    position: absolute; inset: 0;
+    padding: 14px 16px;
+    display: flex; flex-direction: column;
+    justify-content: space-between;
+    color: var(--pc-color);
+    text-shadow: 0 0 8px var(--pc-color-glow);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+  }
+  .screen-top {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 10px; color: var(--ctp-overlay1);
+    text-shadow: none;
+    letter-spacing: 0.12em;
+  }
+  .screen-top .led {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--pc-color);
+    box-shadow: 0 0 8px var(--pc-color);
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  .screen-name {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    line-height: 1;
+  }
+  .screen-ip {
+    font-size: 10px;
+    color: var(--ctp-subtext0);
+    text-shadow: none;
+    margin-top: 2px;
+  }
+  .screen-bottom {
+    display: flex; justify-content: space-between;
+    font-size: 10px; color: var(--ctp-overlay1);
+    text-shadow: none;
+  }
+  .screen-bottom .stat { color: var(--pc-color); }
+
+  .stand {
+    width: 46px; height: 20px;
+    background: linear-gradient(180deg, #2a2a3a, #1a1a28);
+    clip-path: polygon(28% 0, 72% 0, 100% 100%, 0 100%);
+    margin-top: -1px;
+  }
+  .base {
+    width: 150px; height: 8px;
+    background: linear-gradient(180deg, #2a2a3a, #1a1a28);
+    border-radius: 4px;
+    margin-top: -1px;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.55);
+  }
+  .pc-label {
+    margin-top: 12px;
+    font-size: 11px;
+    color: var(--pc-color);
+    letter-spacing: 0.18em;
+    text-shadow: 0 0 12px var(--pc-color-glow);
+  }
+
+  /* ---------- ЛЕТЯЩИЕ ФАЙЛЫ ---------- */
+  .flight-layer {
+    position: absolute; inset: 0;
+    pointer-events: none;
+    z-index: 5;
+    overflow: hidden;
+  }
+  .flyer {
+    position: absolute;
+    top: 0; left: 0;
+    display: flex; flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    will-change: transform, opacity;
+    transform-origin: center center;
+    --file-color: var(--ctp-mauve);
+    --file-color-glow: rgba(203,166,247,0.5);
+  }
+  .flyer-icon {
+    filter: drop-shadow(0 0 14px var(--file-color-glow))
+            drop-shadow(0 6px 12px rgba(0,0,0,0.55));
+  }
+  .flyer-icon svg { display: block; }
+
+  .flyer-label {
+    background: rgba(17,17,27,0.9);
+    border: 1px solid var(--file-color);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 11px;
+    white-space: nowrap;
+    color: var(--ctp-text);
+    box-shadow:
+      0 0 12px var(--file-color-glow),
+      0 4px 12px rgba(0,0,0,0.5);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    letter-spacing: 0.03em;
+  }
+  .flyer-name { color: var(--file-color); font-weight: 700; }
+  .flyer-size { color: var(--ctp-overlay1); margin-left: 6px; }
+
+  /* ---------- CRT ---------- */
+  .crt {
+    position: fixed; inset: 0; z-index: 10; pointer-events: none;
+    background: repeating-linear-gradient(to bottom,
+      rgba(0,0,0,0.18) 0px, rgba(0,0,0,0.18) 1px,
+      transparent 1px, transparent 3px);
+    mix-blend-mode: multiply;
+    animation: flicker 0.15s infinite;
+  }
+  @keyframes flicker { 0%{opacity:.92;} 50%{opacity:1;} 100%{opacity:.95;} }
+
+  .vignette {
+    position: fixed; inset: 0; z-index: 11; pointer-events: none;
+    background: radial-gradient(ellipse at center,
+      transparent 40%, rgba(0,0,0,0.35) 85%, rgba(0,0,0,0.75) 100%);
+  }
+  .beam {
+    position: fixed; left: 0; right: 0; height: 120px; z-index: 12; pointer-events: none;
+    background: linear-gradient(to bottom, transparent,
+      rgba(137,180,250,0.06), rgba(203,166,247,0.10),
+      rgba(137,180,250,0.06), transparent);
+    animation: beamMove 7s linear infinite;
+  }
+  @keyframes beamMove { 0%{top:-20%;} 100%{top:110%;} }
+
+  /* ---------- EMPTY ---------- */
+  .empty {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 10px;
+    color: var(--ctp-overlay0); font-size: 13px;
+    text-align: center; padding: 40px;
+  }
+  .empty .big { font-size: 42px; color: var(--ctp-mauve); filter: drop-shadow(0 0 20px var(--ctp-mauve)); margin-bottom: 8px; }
+  .empty .accent { color: var(--ctp-green); }
+  .empty pre {
+    text-align: left;
+    color: var(--ctp-subtext0);
+    font-size: 12px;
+    margin-top: 14px;
+    background: rgba(0,0,0,0.25);
+    padding: 14px 18px;
+    border-radius: 8px;
+    border: 1px solid var(--ctp-surface1);
+  }
+</style>
+</head>
+<body>
+
+<div class="bg-layer">
+  <div class="glow a"></div>
+  <div class="glow b"></div>
+  <div class="glow c"></div>
+  <div class="grid"></div>
+  <div class="scanlines-bg"></div>
+  <div class="noise"></div>
+</div>
+
+<div class="stage-wrap">
+  <div class="stage-frame">
+    <div class="titlebar">
+      <div class="dots">
+        <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      </div>
+      <div class="title">
+        <span class="path">@artem.grachev</span>
+        <span class="sep">:</span>
+        <span class="path">~/transfer</span>
+        <span class="sep">$</span>
+        <span>tail -f transfer.log</span>
+      </div>
+      <div class="status" id="status">
+        <span class="pulse"></span>
+        <span id="statusText">online</span>
+      </div>
+    </div>
+
+    <div class="stage" id="stage">
+      <div class="link-line"></div>
+
+      <!-- Левый ПК -->
+      <div class="pc left" id="pcLeft">
+        <div class="monitor">
+          <div class="screen">
+            <div class="screen-content">
+              <div class="screen-top"><span class="led"></span><span>TX/RX NODE</span></div>
+              <div>
+                <div class="screen-name" id="pcLeftName">PC-01</div>
+                <div class="screen-ip" id="pcLeftIp">192.168.1.10</div>
+              </div>
+              <div class="screen-bottom">
+                <span>status: <span class="stat">ready</span></span>
+                <span id="pcLeftLink">link: 1Gbps</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="stand"></div>
+        <div class="base"></div>
+        <div class="pc-label" id="pcLeftLabel">PC-01</div>
+      </div>
+
+      <!-- Правый ПК -->
+      <div class="pc right" id="pcRight">
+        <div class="monitor">
+          <div class="screen">
+            <div class="screen-content">
+              <div class="screen-top"><span class="led"></span><span>TX/RX NODE</span></div>
+              <div>
+                <div class="screen-name" id="pcRightName">PC-02</div>
+                <div class="screen-ip" id="pcRightIp">192.168.1.20</div>
+              </div>
+              <div class="screen-bottom">
+                <span>status: <span class="stat">ready</span></span>
+                <span id="pcRightLink">link: 1Gbps</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="stand"></div>
+        <div class="base"></div>
+        <div class="pc-label" id="pcRightLabel">PC-02</div>
+      </div>
+
+      <!-- Слой для летящих файлов -->
+      <div class="flight-layer" id="flightLayer"></div>
+    </div>
+  </div>
+</div>
+
+<div class="crt"></div>
+<div class="vignette"></div>
+<div class="beam"></div>
+
+<!-- Данные -->
+<script src="data.js"></script>
+
+<!-- Логика -->
+<script>
+  const stage        = document.getElementById('stage');
+  const flightLayer  = document.getElementById('flightLayer');
+  const status       = document.getElementById('status');
+  const statusText   = document.getElementById('statusText');
+
+  const pcLeft       = document.getElementById('pcLeft');
+  const pcRight      = document.getElementById('pcRight');
+  const pcLeftName   = document.getElementById('pcLeftName');
+  const pcRightName  = document.getElementById('pcRightName');
+  const pcLeftIp     = document.getElementById('pcLeftIp');
+  const pcRightIp    = document.getElementById('pcRightIp');
+  const pcLeftLabel  = document.getElementById('pcLeftLabel');
+  const pcRightLabel = document.getElementById('pcRightLabel');
+
+  /* ================= НАСТРОЙКИ ================= */
+  const CONFIG = {
+    appearDuration:  700,   // появление файла на экране отправителя
+    holdDuration:    450,   // пауза перед полётом
+    flightMin:       2400,  // минимальная длительность полёта
+    flightMax:       3400,  // максимальная длительность полёта
+    arrivalDuration: 700,   // исчезновение в экране получателя
+    betweenFiles:    800,   // пауза между файлами
+    arcHeight:       120    // высота дуги полёта (px)
+  };
+
+  const PALETTE = ['mauve','green','sky','peach','pink','teal','lavender','yellow','blue','red'];
+
+  /* ================= УТИЛИТЫ ================= */
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const raf   = () => new Promise(r => requestAnimationFrame(r));
+
+  const easeInOutCubic = t =>
+    t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;
+
+  function hexToRgba(hex, a) {
+    const h = hex.replace('#','');
+    const r = parseInt(h.substring(0,2),16);
+    const g = parseInt(h.substring(2,4),16);
+    const b = parseInt(h.substring(4,6),16);
+    return `rgba(${r},${g},${b},${a})`;
+  }
+
+  function getCtpColor(name) {
+    const v = getComputedStyle(document.documentElement)
+      .getPropertyValue('--ctp-' + name).trim();
+    return v || '#cba6f7';
+  }
+
+  /* ================= ИКОНКА ФАЙЛА ================= */
+  function fileIconSVG() {
+    return `
+      <svg viewBox="0 0 40 50" width="46" height="56" xmlns="http://www.w3.org/2000/svg">
+        <path d="M4 4 a2 2 0 0 1 2 -2 h18 l12 12 v32 a2 2 0 0 1 -2 2 h-28 a2 2 0 0 1 -2 -2 z"
+              fill="currentColor" fill-opacity="0.15"
+              stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+        <path d="M24 2 l12 12 h-12 z"
+              fill="currentColor" fill-opacity="0.4"
+              stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+        <line x1="10" y1="24" x2="30" y2="24" stroke="currentColor" stroke-width="1.5" opacity="0.65" stroke-linecap="round"/>
+        <line x1="10" y1="30" x2="30" y2="30" stroke="currentColor" stroke-width="1.5" opacity="0.65" stroke-linecap="round"/>
+        <line x1="10" y1="36" x2="22" y2="36" stroke="currentColor" stroke-width="1.5" opacity="0.65" stroke-linecap="round"/>
+      </svg>`;
+  }
+
+  /* ================= ПРИМЕНЕНИЕ МЕТА ПК ================= */
+  function applyPcMeta(pcEl, nameEl, ipEl, labelEl, meta, fallbackName) {
+    const colorName = (meta.color && /^[a-z]+$/i.test(meta.color))
+      ? meta.color.toLowerCase()
+      : 'mauve';
+    const hex = getCtpColor(colorName);
+    const glow = hexToRgba(hex, 0.4);
+
+    pcEl.style.setProperty('--pc-color', hex);
+    pcEl.style.setProperty('--pc-color-glow', glow);
+
+    const name = meta.name || fallbackName;
+    nameEl.textContent = name;
+    labelEl.textContent = name;
+    ipEl.textContent = meta.ip || '';
+  }
+
+  /* ================= СОЗДАНИЕ ФАЙЛА-ЛЕТУНА ================= */
+  function createFlyer(file) {
+    const colorName = (file.color && /^[a-z]+$/i.test(file.color))
+      ? file.color.toLowerCase()
+      : PALETTE[Math.floor(Math.random() * PALETTE.length)];
+    const hex = getCtpColor(colorName);
+
+    const flyer = document.createElement('div');
+    flyer.className = 'flyer';
+    flyer.style.setProperty('--file-color', hex);
+    flyer.style.setProperty('--file-color-glow', hexToRgba(hex, 0.5));
+
+    const icon = document.createElement('div');
+    icon.className = 'flyer-icon';
+    icon.style.color = hex;
+    icon.innerHTML = fileIconSVG();
+
+    const label = document.createElement('div');
+    label.className = 'flyer-label';
+
+    const nameEl = document.createElement('span');
+    nameEl.className = 'flyer-name';
+    nameEl.textContent = file.name || 'file';
+
+    label.appendChild(nameEl);
+
+    if (file.size) {
+      const sizeEl = document.createElement('span');
+      sizeEl.className = 'flyer-size';
+      sizeEl.textContent = '· ' + file.size;
+      label.appendChild(sizeEl);
+    }
+
+    flyer.appendChild(label);
+    flyer.appendChild(icon);
+
+    return flyer;
+  }
+
+  /* ================= ГЕОМЕТРИЯ ================= */
+  function getAnchor(el, stageRect) {
+    const r = el.getBoundingClientRect();
+    return {
+      x: r.left + r.width/2 - stageRect.left,
+      y: r.top  + r.height/2 - stageRect.top
+    };
+  }
+
+  /* ================= ПОЛЁТ ПО ДУГЕ ================= */
+  function flyArc(flyer, sx, sy, ex, ey, duration) {
+    return new Promise(resolve => {
+      const start = performance.now();
+      const dx = ex - sx;
+      const dy = ey - sy;
+
+      function frame(now) {
+        const t = Math.min(1, (now - start) / duration);
+        const e = easeInOutCubic(t);
+        const x = sx + dx * e;
+        const baseY = sy + dy * e;
+        const arc = -Math.sin(Math.PI * t) * CONFIG.arcHeight;
+        const y = baseY + arc;
+
+        flyer.style.transform =
+          `translate(${x}px, ${y}px) translate(-50%, -50%)`;
+
+        if (t < 1) requestAnimationFrame(frame);
+        else resolve();
+      }
+      requestAnimationFrame(frame);
+    });
+  }
+
+  /* ================= ПУЛЬС ПОЛУЧАТЕЛЯ ================= */
+  function pulsePc(pcEl) {
+    pcEl.classList.remove('pulse');
+    // force reflow
+    void pcEl.offsetWidth;
+    pcEl.classList.add('pulse');
+    setTimeout(() => pcEl.classList.remove('pulse'), 750);
+  }
+
+  /* ================= ГЛАВНЫЙ ПРОЦЕСС ================= */
+  let skipRequested = false;
+  let transferDone  = false;
+
+  async function runTransfer(data) {
+    const pcMeta = {
+      left:  data.left  || {},
+      right: data.right || {}
+    };
+    const transfers = data.transfers || [];
+
+    applyPcMeta(pcLeft,  pcLeftName,  pcLeftIp,  pcLeftLabel,  pcMeta.left,  'PC-01');
+    applyPcMeta(pcRight, pcRightName, pcRightIp, pcRightLabel, pcMeta.right, 'PC-02');
+
+    status.classList.add('tx');
+    statusText.textContent = 'transferring...';
+
+    // даём браузеру пересчитать layout
+    await raf();
+
+    for (const t of transfers) {
+      if (skipRequested) break;
+
+      const fromKey = t.from === 'right' ? 'right' : 'left';
+      const toKey   = t.to   === 'left'  ? 'left'  : 'right';
+      if (fromKey === toKey) continue;
+
+      const fromPc = fromKey === 'left' ? pcLeft  : pcRight;
+      const toPc   = toKey   === 'left' ? pcLeft  : pcRight;
+      const fromScreen = fromPc.querySelector('.screen');
+      const toScreen   = toPc.querySelector('.screen');
+
+      const stageRect = stage.getBoundingClientRect();
+      const fromPos   = getAnchor(fromScreen, stageRect);
+      const toPos     = getAnchor(toScreen,   stageRect);
+
+      const flyer = createFlyer(t);
+      flyer.style.transform =
+        `translate(${fromPos.x}px, ${fromPos.y}px) translate(-50%, -50%) scale(0.25)`;
+      flyer.style.opacity = '0';
+      flightLayer.appendChild(flyer);
+
+      // 1) Появление на экране отправителя
+      await raf();
+      flyer.style.transition = 'opacity 0.28s ease, transform 0.38s cubic-bezier(.2,.9,.3,1.3)';
+      flyer.style.opacity = '1';
+      flyer.style.transform =
+        `translate(${fromPos.x}px, ${fromPos.y}px) translate(-50%, -50%) scale(1)`;
+      await sleep(CONFIG.appearDuration);
+      if (skipRequested) { flyer.remove(); break; }
+
+      // 2) Пауза перед полётом
+      await sleep(CONFIG.holdDuration);
+      if (skipRequested) { flyer.remove(); break; }
+
+      // 3) Полёт по дуге
+      const dx = Math.abs(toPos.x - fromPos.x);
+      const distanceFactor = Math.min(1, dx / 900);
+      const flightDuration = CONFIG.flightMin +
+        (CONFIG.flightMax - CONFIG.flightMin) * distanceFactor;
+
+      flyer.style.transition = 'none';
+      await flyArc(flyer, fromPos.x, fromPos.y, toPos.x, toPos.y, flightDuration);
+      if (skipRequested) { flyer.remove(); break; }
+
+      // 4) Прибытие: пульс получателя + исчезновение файла
+      pulsePc(toPc);
+      flyer.style.transition = 'opacity 0.35s ease, transform 0.4s ease';
+      flyer.style.opacity = '0';
+      flyer.style.transform =
+        `translate(${toPos.x}px, ${toPos.y}px) translate(-50%, -50%) scale(0.35)`;
+      await sleep(CONFIG.arrivalDuration);
+      flyer.remove();
+
+      // 5) Пауза между файлами
+      await sleep(CONFIG.betweenFiles);
+    }
+
+    if (!skipRequested) {
+      status.classList.remove('tx');
+      status.classList.add('done');
+      statusText.textContent = 'online';
+    }
+    transferDone = true;
+  }
+
+  /* ================= ЗАГЛУШКА ================= */
+  function showEmpty() {
+    flightLayer.innerHTML = `
+      <div class="empty">
+        <div class="big">⤓</div>
+        <div>не найден <span class="accent">data.js</span></div>
+        <div style="font-size:12px;max-width:600px;line-height:1.7;margin-top:8px;">
+          создай рядом с index.html файл <span class="accent">data.js</span>:
+        </div>
+        <pre>window.__TRANSFER__ = {
+  left:  { name: "PC-01", ip: "192.168.1.10", color: "sky" },
+  right: { name: "PC-02", ip: "192.168.1.20", color: "peach" },
+  transfers: [
+    { from: "left",  to: "right", name: "report.pdf", size: "2.4 MB", color: "red"   },
+    { from: "right", to: "left",  name: "data.csv",   size: "128 KB", color: "green" },
+    { from: "left",  to: "right", name: "backup.zip", size: "512 MB", color: "mauve" }
+  ]
+};</pre>
+      </div>`;
+    statusText.textContent = 'no data';
+  }
+
+  /* ================= SKIP ================= */
+  function requestSkip() {
+    if (transferDone) return;
+    skipRequested = true;
+    statusText.textContent = 'skipped';
+  }
+  document.addEventListener('click', requestSkip);
+  document.addEventListener('keydown', requestSkip);
+
+  /* ================= INIT ================= */
+  const data = window.__TRANSFER__;
+  if (data && Array.isArray(data.transfers) && data.transfers.length) {
+    setTimeout(() => runTransfer(data), 300);
+  } else {
+    showEmpty();
+  }
+</script>
+</body>
+</html>

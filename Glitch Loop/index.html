@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Glitch Loop</title>
+<style>
+  :root {
+    --ctp-base:#1e1e2e; --ctp-crust:#11111b; --ctp-text:#cdd6f4;
+    --ctp-mauve:#cba6f7; --ctp-sky:#89dceb; --ctp-pink:#f5c2e7;
+    --ctp-blue:#89b4fa; --ctp-green:#a6e3a1; --ctp-overlay0:#6c7086;
+    --ctp-subtext0:#a6adc8; --ctp-surface1:#45475a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%; overflow: hidden;
+    background: var(--ctp-crust);
+    font-family: "JetBrains Mono","Fira Code","SF Mono",Consolas,monospace;
+    color: var(--ctp-text);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ===== корпус монитора ===== */
+  .monitor {
+    position: fixed; inset: 0; z-index: 2;
+    padding: clamp(6px, 1.1vmin, 16px);
+    background: linear-gradient(160deg, #16161e 0%, #0b0b12 45%, #05050a 100%);
+  }
+  .monitor::after {
+    content: '';
+    position: absolute;
+    right: calc(clamp(6px, 1.1vmin, 16px) + 8px);
+    bottom: calc(clamp(6px, 1.1vmin, 16px) / 2);
+    width: 4px; height: 4px; border-radius: 50%;
+    background: var(--ctp-green);
+    box-shadow: 0 0 6px var(--ctp-green), 0 0 14px rgba(166,227,161,0.6);
+  }
+
+  /* ===== экран ===== */
+  .screen {
+    position: relative; width: 100%; height: 100%;
+    border-radius: clamp(4px, 0.7vmin, 12px);
+    overflow: hidden;
+    background: var(--ctp-base);
+    box-shadow:
+      inset 0 0 0 1px rgba(255,255,255,0.05),
+      inset 0 0 120px rgba(0,0,0,0.55);
+  }
+  .screen::before {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, transparent 42%);
+    pointer-events: none; z-index: 6;
+  }
+
+  /* фон под артом — статические градиенты, без фильтров и анимации */
+  .fx {
+    position: absolute; inset: 0; z-index: 1; pointer-events: none;
+    background:
+      radial-gradient(circle at 18% 22%, rgba(203,166,247,0.16), transparent 42%),
+      radial-gradient(circle at 82% 78%, rgba(137,220,235,0.14), transparent 42%),
+      radial-gradient(circle at 55% 50%, rgba(245,194,231,0.08), transparent 45%);
+  }
+
+  .stage { position: absolute; inset: 0; z-index: 5; }
+  #c { display: block; width: 100%; height: 100%; }
+
+  /* ===== CRT-оверлеи — статичные ===== */
+  .crt {
+    position: fixed; inset: 0; z-index: 10; pointer-events: none;
+    background: repeating-linear-gradient(to bottom,
+      rgba(0,0,0,0.18) 0px, rgba(0,0,0,0.18) 1px,
+      transparent 1px, transparent 3px);
+    mix-blend-mode: multiply;
+    opacity: 0.9;
+  }
+  .vignette {
+    position: fixed; inset: 0; z-index: 11; pointer-events: none;
+    background: radial-gradient(ellipse at center,
+      transparent 42%, rgba(0,0,0,0.30) 85%, rgba(0,0,0,0.72) 100%);
+  }
+  .beam {
+    position: fixed; left: 0; right: 0; top: 0; height: 120px;
+    z-index: 12; pointer-events: none;
+    background: linear-gradient(to bottom, transparent,
+      rgba(137,180,250,0.05), rgba(203,166,247,0.09),
+      rgba(137,180,250,0.05), transparent);
+    animation: beamMove 8s linear infinite;
+    will-change: transform;
+  }
+  @keyframes beamMove {
+    0%   { transform: translateY(-30vh); }
+    100% { transform: translateY(130vh); }
+  }
+
+  /* ===== заглушка ===== */
+  .empty {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 10px;
+    color: var(--ctp-overlay0); font-size: 13px;
+    text-align: center; padding: 40px; z-index: 8;
+  }
+  .empty .big { font-size: 42px; color: var(--ctp-mauve); margin-bottom: 8px; }
+  .empty .accent { color: var(--ctp-green); }
+  .empty pre {
+    text-align: left; color: var(--ctp-subtext0); font-size: 12px;
+    margin-top: 14px; background: rgba(0,0,0,0.25);
+    padding: 14px 18px; border-radius: 8px;
+    border: 1px solid var(--ctp-surface1); white-space: pre;
+  }
+</style>
+</head>
+<body>
+
+<div class="monitor">
+  <div class="screen" id="screen">
+    <div class="fx"></div>
+    <div class="stage"><canvas id="c"></canvas></div>
+  </div>
+</div>
+
+<div class="crt"></div>
+<div class="vignette"></div>
+<div class="beam"></div>
+
+<script src="data.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var screenEl = document.getElementById('screen');
+  var canvas   = document.getElementById('c');
+  var ctx      = canvas.getContext('2d', { alpha: true, desynchronized: true });
+
+  var FONT = 'monospace';
+  var TEXT_COLOR = '#cdd6f4';
+
+  /* ---------- тайминги фаз (мс) ---------- */
+  var T = {
+    buildDur:   900, buildDelay: 500,   // сборка
+    holdDur:    650,                    // пауза
+    shakeDur:  1400,                    // потрясывание
+    glitchDur: 1100,                    // глитч
+    decayDur:   800, decayDelay: 400,   // распад
+    voidDur:    300                     // пустота
+  };
+
+  var PHASE = { BUILD:0, HOLD:1, SHAKE:2, GLITCH:3, DECAY:4, VOID:5 };
+  var GLYPHS = '!<>-_\\/[]{}=+*^?#@$%&0123456789ABCDEF'.split('');
+
+  var W = 0, H = 0, dpr = 1;
+  var lines = [], cols = 0, rows = 0;
+  var fontSize = 20, charW = 12, charH = 20, charRatio = 0.6;
+  var originX = 0, originY = 0;
+  var chars = [];
+  var rowOffX = null, rowOffY = null, rowTint = null;
+  var corruptMap = new Map();
+  var glitchLastRefresh = 0;
+  var flashAlpha = 0;
+
+  var phase = PHASE.BUILD;
+  var phaseStart = 0;
+  var needDraw = true;
+  var rafId = null;
+  var running = false;
+
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+
+  /* ============================================================
+     измерение ширины символа моношрифта
+     ============================================================ */
+  function measureRatio() {
+    var c = document.createElement('canvas');
+    var g = c.getContext('2d');
+    g.font = '100px ' + FONT;
+    var w = g.measureText('M').width;
+    return (w / 100) || 0.6;
+  }
+
+  /* ============================================================
+     парсинг
+     ============================================================ */
+  function parseLines(text) {
+    var arr = String(text)
+      .replace(/\r\n?/g, '\n')
+      .replace(/\t/g, '    ')
+      .split('\n')
+      .map(function (l) { return l.replace(/\s+$/, ''); });
+    while (arr.length && arr[0].trim() === '') arr.shift();
+    while (arr.length && arr[arr.length - 1].trim() === '') arr.pop();
+    return arr;
+  }
+
+  /* ============================================================
+     модель символов
+     ============================================================ */
+  function buildChars() {
+    chars = [];
+    for (var r = 0; r < rows; r++) {
+      var line = lines[r];
+      for (var c = 0; c < line.length; c++) {
+        var ch = line.charAt(c);
+        if (ch === ' ') continue;
+        chars.push({
+          ch: ch, row: r, col: c,
+          x: 0, y: 0,
+          inX: 0, inY: 0, inR: 0, inD: 0,
+          outX: 0, outY: 0, outR: 0, outD: 0
+        });
+      }
+    }
+
+    for (var i = 0; i < chars.length; i++) {
+      var c2 = chars[i];
+      var a1 = Math.random() * Math.PI * 2;
+      var d1 = 180 + Math.random() * 620;
+      c2.inX = Math.cos(a1) * d1;
+      c2.inY = Math.sin(a1) * d1;
+      c2.inR = (Math.random() * 2 - 1) * 200;
+
+      var a2 = Math.random() * Math.PI * 2;
+      var d2 = 160 + Math.random() * 680;
+      c2.outX = Math.cos(a2) * d2;
+      c2.outY = Math.sin(a2) * d2 - 80;
+      c2.outR = (Math.random() * 2 - 1) * 340;
+
+      var wave = (c2.row / Math.max(1, rows)) * 0.35
+               + (c2.col / Math.max(1, cols)) * 0.35;
+      c2.inD  = (wave + Math.random() * 0.35) * T.buildDelay;
+      c2.outD = Math.random() * T.decayDelay;
+    }
+  }
+
+  /* ============================================================
+     layout
+     ============================================================ */
+  function layout() {
+    if (!lines.length) return;
+
+    var padX = Math.max(12, W * 0.03);
+    var padY = Math.max(12, H * 0.05);
+    var availW = W - padX * 2;
+    var availH = H - padY * 2;
+
+    var fsW = availW / (cols * charRatio);
+    var fsH = availH / rows;
+    fontSize = Math.max(4, Math.min(fsW, fsH, 220));
+    charW = fontSize * charRatio;
+    charH = fontSize;
+
+    var totalW = cols * charW;
+    var totalH = rows * charH;
+    originX = Math.round((W - totalW) * 0.5);
+    originY = Math.round((H - totalH) * 0.5);
+
+    for (var i = 0; i < chars.length; i++) {
+      var c = chars[i];
+      c.x = originX + c.col * charW + charW * 0.5;
+      c.y = originY + c.row * charH + charH * 0.5;
+    }
+  }
+
+  /* ============================================================
+     resize
+     ============================================================ */
+  function resize() {
+    var rect = screenEl.getBoundingClientRect();
+    W = Math.max(1, rect.width);
+    H = Math.max(1, rect.height);
+
+    /* адаптивный DPR: чем больше символов — тем меньше DPR */
+    var baseDpr = window.devicePixelRatio || 1;
+    var cap = 1.25;
+    if (chars.length > 1200) cap = 1.0;
+    if (chars.length > 2600) cap = 0.85;
+    dpr = Math.min(baseDpr, cap);
+
+    canvas.width  = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    canvas.style.width  = W + 'px';
+    canvas.style.height = H + 'px';
+
+    layout();
+    needDraw = true;
+  }
+
+  /* ============================================================
+     глитч — обновление срезов строк
+     ============================================================ */
+  function refreshGlitchRow(now) {
+    if (!rowOffX || rowOffX.length !== rows) {
+      rowOffX  = new Float32Array(rows);
+      rowOffY  = new Float32Array(rows);
+      rowTint  = new Int8Array(rows);
+    }
+    for (var r = 0; r < rows; r++) {
+      rowOffX[r] = (Math.random() < 0.42)
+        ? (Math.random() * 2 - 1) * 48
+        : (Math.random() * 2 - 1) * 6;
+      rowOffY[r] = (Math.random() * 2 - 1) * 5;
+      var t = Math.random();
+      rowTint[r] = t < 0.04 ? 1 : t < 0.08 ? 2 : t < 0.10 ? 3 : 0;
+    }
+    glitchLastRefresh = now;
+  }
+
+  function updateCorruption(now) {
+    corruptMap.forEach(function (v, k) {
+      if (v.until < now) corruptMap.delete(k);
+    });
+    var n = 4 + ((Math.random() * 14) | 0);
+    for (var i = 0; i < n; i++) {
+      var idx = (Math.random() * chars.length) | 0;
+      corruptMap.set(idx, {
+        g: GLYPHS[(Math.random() * GLYPHS.length) | 0],
+        until: now + 40 + Math.random() * 130
+      });
+    }
+  }
+
+  /* ============================================================
+     отрисовка
+     ============================================================ */
+  function draw(now, t) {
+    /* HOLD / VOID — рисуем только один раз на входе в фазу */
+    if ((phase === PHASE.HOLD || phase === PHASE.VOID) && !needDraw) return;
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (phase === PHASE.VOID) return;
+
+    /* ---- HOLD: быстрый путь, весь текст построчно ---- */
+    if (phase === PHASE.HOLD) {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.font = fontSize.toFixed(2) + 'px ' + FONT;
+      ctx.textBaseline = 'top';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = TEXT_COLOR;
+      for (var r = 0; r < rows; r++) {
+        ctx.fillText(lines[r], originX, originY + r * charH);
+      }
+      return;
+    }
+
+    /* ---- параметры фазы ---- */
+    var gx = 0, gy = 0;
+    var useRowOff = false;
+    var useGlitch = false;
+
+    if (phase === PHASE.SHAKE) {
+      var k = t / T.shakeDur;
+      var amp = 1 + k * k * 16;
+      gx = (Math.random() * 2 - 1) * amp * 0.7;
+      gy = (Math.random() * 2 - 1) * amp * 0.5;
+      useRowOff = true;
+
+      if (!rowOffX || rowOffX.length !== rows || Math.random() < 0.35) {
+        if (!rowOffX || rowOffX.length !== rows) {
+          rowOffX = new Float32Array(rows);
+          rowOffY = new Float32Array(rows);
+          rowTint = new Int8Array(rows);
+        }
+        for (var rr = 0; rr < rows; rr++) {
+          rowOffX[rr] = (Math.random() * 2 - 1) * amp * 0.9;
+          rowOffY[rr] = (Math.random() * 2 - 1) * amp * 0.5;
+          rowTint[rr] = 0;
+        }
+      }
+    } else if (phase === PHASE.GLITCH) {
+      useGlitch = true;
+      gx = (Math.random() * 2 - 1) * 10;
+      gy = (Math.random() * 2 - 1) * 4;
+      useRowOff = true;
+      if (now - glitchLastRefresh > 55) refreshGlitchRow(now);
+      if (Math.random() < 0.045) flashAlpha = 0.35;
+    }
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.font = fontSize.toFixed(2) + 'px ' + FONT;
+    ctx.textBaseline = 'top';
+    ctx.textAlign = 'left';
+
+    var halfW = charW * 0.5;
+    var halfH = charH * 0.5;
+    var kk = dpr;
+    var total = chars.length;
+
+    for (var i = 0; i < total; i++) {
+      var c = chars[i];
+      var x = c.x, y = c.y;
+      var rot = 0, scale = 1, alpha = 1;
+
+      if (phase === PHASE.BUILD) {
+        var p = (t - c.inD) / T.buildDur;
+        if (p <= 0) continue;
+        var pp = p >= 1 ? 1 : p;
+        var e = 1 - Math.pow(1 - pp, 3);
+        var inv = 1 - e;
+        x += c.inX * inv;
+        y += c.inY * inv;
+        rot = c.inR * inv;
+        scale = 0.22 + 0.78 * e;
+        alpha = pp < 0.25 ? pp / 0.25 : 1;
+      } else if (phase === PHASE.DECAY) {
+        var pd = (t - c.outD) / T.decayDur;
+        if (pd >= 1) continue;
+        var ppd = pd < 0 ? 0 : pd;
+        var ed = ppd * ppd * ppd;
+        x += c.outX * ed;
+        y += c.outY * ed;
+        rot = c.outR * ed;
+        scale = 1 - 0.88 * ed;
+        alpha = 1 - ppd;
+      }
+
+      if (useRowOff) {
+        x += rowOffX[c.row];
+        y += rowOffY[c.row];
+      }
+      x += gx;
+      y += gy;
+
+      if (alpha <= 0.01 || scale <= 0.02) continue;
+
+      var ch = c.ch;
+      if (useGlitch) {
+        var co = corruptMap.get(i);
+        if (co) ch = co.g;
+      }
+
+      var color = TEXT_COLOR;
+      if (useRowOff && rowTint) {
+        var tint = rowTint[c.row];
+        if (tint === 1) color = '#f38ba8';
+        else if (tint === 2) color = '#94e2d5';
+        else if (tint === 3) color = '#f9e2af';
+      }
+      ctx.fillStyle = color;
+      ctx.globalAlpha = alpha;
+
+      var a = Math.cos(rot) * scale;
+      var b = Math.sin(rot) * scale;
+      ctx.setTransform(a * kk, b * kk, -b * kk, a * kk, x * kk, y * kk);
+      ctx.fillText(ch, -halfW, -halfH);
+    }
+
+    ctx.globalAlpha = 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    /* ---- вспышка на глитче ---- */
+    if (flashAlpha > 0.01) {
+      ctx.fillStyle = 'rgba(200,220,255,' + flashAlpha.toFixed(3) + ')';
+      ctx.fillRect(0, 0, W, H);
+      flashAlpha *= 0.72;
+    } else {
+      flashAlpha = 0;
+    }
+  }
+
+  /* ============================================================
+     машина состояний
+     ============================================================ */
+  function nextPhase(p, now) {
+    phase = p;
+    phaseStart = now;
+    needDraw = true;
+    if (p === PHASE.SHAKE) {
+      rowOffX = null; rowOffY = null; rowTint = null;
+    }
+    if (p === PHASE.GLITCH) {
+      corruptMap.clear();
+      glitchLastRefresh = 0;
+      flashAlpha = 0.55;
+    }
+    if (p === PHASE.HOLD) {
+      corruptMap.clear();
+    }
+  }
+
+  function frame(now) {
+    if (!running) return;
+
+    if (!phaseStart) phaseStart = now;
+    var t = now - phaseStart;
+
+    if (phase === PHASE.BUILD) {
+      if (t >= T.buildDur + T.buildDelay) nextPhase(PHASE.HOLD, now);
+    } else if (phase === PHASE.HOLD) {
+      if (t >= T.holdDur) nextPhase(PHASE.SHAKE, now);
+    } else if (phase === PHASE.SHAKE) {
+      if (t >= T.shakeDur) nextPhase(PHASE.GLITCH, now);
+    } else if (phase === PHASE.GLITCH) {
+      updateCorruption(now);
+      if (t >= T.glitchDur) nextPhase(PHASE.DECAY, now);
+    } else if (phase === PHASE.DECAY) {
+      if (t >= T.decayDur + T.decayDelay) nextPhase(PHASE.VOID, now);
+    } else if (phase === PHASE.VOID) {
+      if (t >= T.voidDur) nextPhase(PHASE.BUILD, now);
+    }
+
+    draw(now, t);
+    needDraw = false;
+
+    rafId = requestAnimationFrame(frame);
+  }
+
+  /* ============================================================
+     заглушка
+     ============================================================ */
+  function showEmpty() {
+    var div = document.createElement('div');
+    div.className = 'empty';
+    div.innerHTML =
+      '<div class="big">⤓</div>' +
+      '<div>не найден <span class="accent">data.js</span></div>' +
+      '<div style="font-size:12px;max-width:520px;line-height:1.7;margin-top:8px;">' +
+        'создай рядом с index.html файл <span class="accent">data.js</span> и оберни свой ASCII-арт так:' +
+      '</div>' +
+      '<pre>window.__DATA__ = String.raw`\n' +
+      '  ___   _   ___ \n' +
+      ' / _ \\ /_\\ / __|\n' +
+      '| (_) / _ \\\\__ \\\n' +
+      ' \\___/_/ \\_\\___/\n' +
+      '`;</pre>';
+    screenEl.appendChild(div);
+  }
+
+  /* ============================================================
+     старт
+     ============================================================ */
+  function boot() {
+    var raw = window.__DATA__;
+    if (typeof raw !== 'string' || !raw.length) { showEmpty(); return; }
+
+    lines = parseLines(raw);
+    if (!lines.length) { showEmpty(); return; }
+
+    rows = lines.length;
+    cols = Math.max(1, Math.max.apply(null, lines.map(function (l) { return l.length; })));
+
+    charRatio = measureRatio();
+    buildChars();
+    resize();
+
+    running = true;
+    phaseStart = 0;
+    phase = PHASE.BUILD;
+    rafId = requestAnimationFrame(frame);
+  }
+
+  /* ---- resize (debounce) ---- */
+  var resizeTimer = null;
+  window.addEventListener('resize', function () {
+    if (!lines.length) return;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(resize, 120);
+  });
+
+  /* ---- пауза во вкладке-фоне ---- */
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) {
+      running = false;
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = null;
+    } else if (lines.length) {
+      running = true;
+      phaseStart = 0;
+      rafId = requestAnimationFrame(frame);
+    }
+  });
+
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(function () { setTimeout(boot, 50); })
+                      .catch(function () { setTimeout(boot, 50); });
+  } else {
+    setTimeout(boot, 100);
+  }
+})();
+</script>
+</body>
+</html>

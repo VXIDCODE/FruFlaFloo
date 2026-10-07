@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Terminal — Screen</title>
+<style>
+  :root {
+    --ctp-base:#1e1e2e; --ctp-mantle:#181825; --ctp-crust:#11111b;
+    --ctp-surface0:#313244; --ctp-surface1:#45475a; --ctp-surface2:#585b70;
+    --ctp-overlay0:#6c7086; --ctp-overlay1:#7f849c;
+    --ctp-text:#cdd6f4; --ctp-subtext0:#a6adc8;
+    --ctp-green:#a6e3a1; --ctp-teal:#94e2d5; --ctp-sky:#89dceb;
+    --ctp-blue:#89b4fa; --ctp-lavender:#b4befe; --ctp-mauve:#cba6f7;
+    --ctp-pink:#f5c2e7; --ctp-red:#f38ba8; --ctp-peach:#fab387; --ctp-yellow:#f9e2af;
+    --fs: 16px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%; overflow: hidden; background: var(--ctp-crust);
+    font-family: "JetBrains Mono","Fira Code","SF Mono",Consolas,monospace;
+    color: var(--ctp-text);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ============================================================
+     МОНИТОР (корпус) — занимает весь вьюпорт
+     ============================================================ */
+  .monitor {
+    position: fixed; inset: 0; z-index: 2;
+    padding: clamp(6px, 1.1vmin, 16px);
+    background:
+      radial-gradient(ellipse at 50% 0%, rgba(255,255,255,0.05), transparent 60%),
+      linear-gradient(160deg, #16161e 0%, #0b0b12 45%, #05050a 100%);
+  }
+  .monitor::after {
+    content: '';
+    position: absolute;
+    right: calc(clamp(6px, 1.1vmin, 16px) + 8px);
+    bottom: calc(clamp(6px, 1.1vmin, 16px) / 2);
+    width: 4px; height: 4px; border-radius: 50%;
+    background: var(--ctp-green);
+    box-shadow: 0 0 6px var(--ctp-green), 0 0 14px rgba(166,227,161,0.6);
+  }
+
+  /* ============================================================
+     ЭКРАН
+     ============================================================ */
+  .screen {
+    position: relative;
+    width: 100%; height: 100%;
+    border-radius: clamp(4px, 0.7vmin, 12px);
+    overflow: hidden;
+    background: var(--ctp-base);
+    box-shadow:
+      inset 0 0 0 1px rgba(255,255,255,0.05),
+      inset 0 0 120px rgba(0,0,0,0.55),
+      0 0 40px rgba(137,180,250,0.08);
+  }
+  .screen::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, transparent 42%);
+    pointer-events: none; z-index: 6;
+  }
+
+  /* Эффекты под текстом */
+  .screen-fx {
+    position: absolute; inset: 0; overflow: hidden;
+    z-index: 1; pointer-events: none;
+  }
+  .glow {
+    position: absolute; border-radius: 50%;
+    filter: blur(90px); opacity: 0.35;
+    animation: float 18s ease-in-out infinite;
+  }
+  .glow.a { width: 60%; height: 60%; background: var(--ctp-mauve); top: -30%; left: -25%; }
+  .glow.b { width: 55%; height: 55%; background: var(--ctp-sky);  bottom: -30%; right: -25%; animation-delay: -6s; }
+  .glow.c { width: 45%; height: 45%; background: var(--ctp-pink); top: 40%; left: 60%; animation-delay: -12s; opacity: 0.22; }
+  @keyframes float {
+    0%,100% { transform: translate(0,0) scale(1); }
+    50%     { transform: translate(30px,-24px) scale(1.12); }
+  }
+  .grid {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(137,180,250,0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(137,180,250,0.05) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse at 50% 50%, #000 10%, transparent 80%);
+    -webkit-mask-image: radial-gradient(ellipse at 50% 50%, #000 10%, transparent 80%);
+    animation: gridScroll 30s linear infinite;
+  }
+  @keyframes gridScroll {
+    from { background-position: 0 0, 0 0; }
+    to   { background-position: 0 48px, 48px 0; }
+  }
+  .noise {
+    position: absolute; inset: 0; opacity: 0.06;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    mix-blend-mode: overlay;
+  }
+
+  /* ============================================================
+     ВЫВОД ТЕКСТА
+     ============================================================ */
+  .output {
+    position: absolute; inset: 0;
+    padding: 1.2em 0.7em;              /* ← см. CONFIG.paddingYEm / paddingXEm */
+    font-size: var(--fs);
+    line-height: 1.55;
+    color: var(--ctp-text);
+    white-space: pre;
+    overflow: hidden;
+    text-shadow: 0 0 4px rgba(205,214,244,0.22);
+    font-variant-ligatures: none;
+    z-index: 5;
+  }
+
+  .line {
+    display: block;
+    white-space: pre;
+    line-height: 1.55;                 /* ← CONFIG.lineHeight */
+    min-height: 1.55em;
+    animation: lineIn 0.18s ease-out;
+  }
+  @keyframes lineIn {
+    from { opacity: 0; transform: translateX(-4px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+
+  .content {
+    white-space: pre;
+    line-height: 1.55;
+  }
+
+  .cursor {
+    display: inline-block;
+    width: 0.55em; height: 1.02em;
+    background: var(--ctp-green);
+    vertical-align: text-bottom;
+    margin-left: 0.08em;
+    animation: blink 1s steps(2, start) infinite;
+    box-shadow: 0 0 8px var(--ctp-green);
+  }
+  @keyframes blink { to { visibility: hidden; } }
+
+  /* ============================================================
+     CRT-ОФОРМЛЕНИЕ ПОВЕРХ ВСЕГО
+     ============================================================ */
+  .crt {
+    position: fixed; inset: 0; z-index: 10; pointer-events: none;
+    background: repeating-linear-gradient(to bottom,
+      rgba(0,0,0,0.18) 0px, rgba(0,0,0,0.18) 1px,
+      transparent 1px, transparent 3px);
+    mix-blend-mode: multiply;
+    animation: flicker 0.15s infinite;
+  }
+  @keyframes flicker { 0%{opacity:.92;} 50%{opacity:1;} 100%{opacity:.95;} }
+
+  .vignette {
+    position: fixed; inset: 0; z-index: 11; pointer-events: none;
+    background: radial-gradient(ellipse at center,
+      transparent 42%, rgba(0,0,0,0.30) 85%, rgba(0,0,0,0.72) 100%);
+  }
+  .beam {
+    position: fixed; left: 0; right: 0; height: 120px;
+    z-index: 12; pointer-events: none;
+    background: linear-gradient(to bottom, transparent,
+      rgba(137,180,250,0.05), rgba(203,166,247,0.09),
+      rgba(137,180,250,0.05), transparent);
+    animation: beamMove 8s linear infinite;
+  }
+  @keyframes beamMove { 0%{top:-20%;} 100%{top:110%;} }
+
+  /* ============================================================
+     ЗАГЛУШКА (нет data.js)
+     ============================================================ */
+  .empty {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 10px;
+    color: var(--ctp-overlay0); font-size: 13px;
+    text-align: center; padding: 40px;
+  }
+  .empty .big { font-size: 42px; color: var(--ctp-mauve);
+                filter: drop-shadow(0 0 20px var(--ctp-mauve)); margin-bottom: 8px; }
+  .empty .accent { color: var(--ctp-green); }
+</style>
+</head>
+<body>
+
+<!-- Монитор -->
+<div class="monitor">
+  <div class="screen" id="screen">
+    <div class="screen-fx">
+      <div class="glow a"></div>
+      <div class="glow b"></div>
+      <div class="glow c"></div>
+      <div class="grid"></div>
+      <div class="noise"></div>
+    </div>
+    <div class="output" id="output"></div>
+  </div>
+</div>
+
+<!-- CRT-оверлеи -->
+<div class="crt"></div>
+<div class="vignette"></div>
+<div class="beam"></div>
+
+<!-- Данные -->
+<script src="data.js"></script>
+
+<!-- Логика -->
+<script>
+  const output   = document.getElementById('output');
+  const screenEl = document.getElementById('screen');
+
+  /* ============================================================
+     НАСТРОЙКИ
+     ============================================================ */
+  const CONFIG = {
+    /* печать */
+    baseDelay:       25,
+    jitter:          15,
+    pauseAfterPunct: {
+      ',': 55, '.': 100, ';': 75, ':': 65,
+      '!': 95, '?': 110, ')': 28, '}': 28, ']': 28
+    },
+    lineDelay:       80,
+    emptyLineDelay:  16,
+    spaceMultiplier: 0.65,
+
+    /* геометрия (в em) — должны совпадать с CSS */
+    paddingXEm: 0.7,   /* .output { padding-left/right } */
+    paddingYEm: 1.2,   /* .output { padding-top/bottom } */
+    lineHeight: 1.55,  /* .line    { line-height }        */
+
+    /* прочее */
+    maxFontPx: 72,
+    minFontPx: 6,
+    safety:    0.97,
+    maxFitIterations: 40
+  };
+
+  /* ============================================================
+     ИЗМЕРЕНИЕ ТЕКСТА
+     ============================================================ */
+
+  /* Возвращает ширину самой широкой строки в px при font-size = 1px */
+  function measureWidestLine(lines) {
+    const ff = getComputedStyle(output).fontFamily || 'monospace';
+
+    const probe = document.createElement('span');
+    probe.style.cssText =
+      'position:absolute;left:-99999px;top:0;visibility:hidden;' +
+      'white-space:pre;font-family:' + ff + ';font-size:100px;' +
+      'line-height:normal;letter-spacing:normal;font-weight:400;font-style:normal;' +
+      'font-variant-ligatures:none;';
+    document.body.appendChild(probe);
+
+    let max = 1;
+    for (let i = 0; i < lines.length; i++) {
+      probe.textContent = lines[i].length ? lines[i] : ' ';
+      const w = probe.getBoundingClientRect().width;
+      if (w > max) max = w;
+    }
+
+    probe.remove();
+    return max / 100;   /* px на 1px font-size */
+  }
+
+  /* Оценка оптимального размера шрифта */
+  function computeFontSize(lines) {
+    const W = output.clientWidth;
+    const H = output.clientHeight;
+    if (W <= 0 || H <= 0) return CONFIG.minFontPx;
+
+    const widestPerPx = measureWidestLine(lines);
+    const count = Math.max(1, lines.length);
+
+    /* ширина: 2*paddingX*fs + widestPerPx*fs <= W */
+    const fsByW = W / (2 * CONFIG.paddingXEm + widestPerPx);
+    /* высота: 2*paddingY*fs + count*lineHeight*fs <= H */
+    const fsByH = H / (2 * CONFIG.paddingYEm + count * CONFIG.lineHeight);
+
+    let fs = Math.min(fsByW, fsByH) * CONFIG.safety;
+    fs = Math.min(CONFIG.maxFontPx, Math.max(CONFIG.minFontPx, fs));
+    return Math.floor(fs * 10) / 10;
+  }
+
+  function setFontSize(fs) {
+    document.documentElement.style.setProperty('--fs', fs.toFixed(2) + 'px');
+  }
+
+  function applyFontSize(lines) {
+    setFontSize(computeFontSize(lines));
+  }
+
+  /* ============================================================
+     ПРОВЕРКА ПО РЕАЛЬНОМУ DOM (страховка от переполнения)
+     ============================================================ */
+  const raf2 = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+  function renderStatic(lines) {
+    output.innerHTML = '';
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < lines.length; i++) {
+      const raw = lines[i];
+      const lineEl = document.createElement('div');
+      lineEl.className = 'line';
+
+      const content = document.createElement('span');
+      content.className = 'content';
+      content.textContent = raw.length ? raw : '\u00a0';
+
+      lineEl.appendChild(content);
+      frag.appendChild(lineEl);
+    }
+    output.appendChild(frag);
+  }
+
+  async function fitToScreen(lines) {
+    let fs = computeFontSize(lines);
+    setFontSize(fs);
+
+    const prevVis = output.style.visibility;
+    output.style.visibility = 'hidden';
+
+    for (let iter = 0; iter < CONFIG.maxFitIterations; iter++) {
+      renderStatic(lines);
+      await raf2();
+
+      const contents = output.querySelectorAll('.content');
+      const availW = output.clientWidth  - 2 * CONFIG.paddingXEm * fs;
+      const availH = output.clientHeight - 2 * CONFIG.paddingYEm * fs;
+
+      let maxW = 0;
+      for (let i = 0; i < contents.length; i++) {
+        const w = contents[i].getBoundingClientRect().width;
+        if (w > maxW) maxW = w;
+      }
+      const neededH = contents.length * CONFIG.lineHeight * fs;
+
+      if (maxW <= availW && neededH <= availH) break;
+
+      let k = 1;
+      if (maxW > 0)   k = Math.min(k, availW / maxW);
+      if (neededH > 0) k = Math.min(k, availH / neededH);
+      k = Math.min(k, 0.98);
+
+      const next = Math.floor(fs * k * 10) / 10;
+      if (next <= CONFIG.minFontPx || next >= fs) {
+        fs = Math.max(CONFIG.minFontPx, next);
+        setFontSize(fs);
+        break;
+      }
+      fs = next;
+      setFontSize(fs);
+    }
+
+    output.innerHTML = '';
+    output.style.visibility = prevVis;
+    return fs;
+  }
+
+  /* ============================================================
+     ПЕЧАТЬ
+     ============================================================ */
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  let skipRequested = false;
+
+  function typeLine(rawLine, contentEl, cursor) {
+    return new Promise(resolve => {
+      contentEl.appendChild(cursor);
+
+      let idx = 0;
+
+      const removeCursor = () => { if (cursor.parentNode) cursor.parentNode.removeChild(cursor); };
+      const finish = () => { removeCursor(); resolve(); };
+
+      function step() {
+        if (skipRequested) {
+          removeCursor();
+          contentEl.textContent = rawLine;
+          resolve();
+          return;
+        }
+        if (idx >= rawLine.length) { finish(); return; }
+
+        const ch = rawLine[idx];
+        contentEl.insertBefore(document.createTextNode(ch), cursor);
+        idx++;
+
+        let delay = CONFIG.baseDelay + Math.random() * CONFIG.jitter;
+        if (ch === ' ') delay *= CONFIG.spaceMultiplier;
+        const p = CONFIG.pauseAfterPunct[ch];
+        if (p) delay += p;
+
+        setTimeout(step, delay);
+      }
+
+      step();
+    });
+  }
+
+  function parseLines(text) {
+    const lines = text.replace(/\r\n?/g, '\n').split('\n');
+    if (lines[0] === '') lines.shift();
+    if (lines[lines.length - 1] === '') lines.pop();
+    return lines;
+  }
+
+  async function typeAll(lines) {
+    output.innerHTML = '';
+    const total = lines.length;
+
+    const cursor = document.createElement('span');
+    cursor.className = 'cursor';
+
+    for (let i = 0; i < total; i++) {
+      const raw = lines[i];
+
+      const lineEl = document.createElement('div');
+      lineEl.className = 'line';
+
+      const content = document.createElement('span');
+      content.className = 'content';
+
+      lineEl.appendChild(content);
+      output.appendChild(lineEl);
+
+      if (skipRequested) {
+        content.textContent = raw === '' ? '\u00a0' : raw;
+        continue;
+      }
+
+      if (raw.length === 0) {
+        content.textContent = '\u00a0';
+        await sleep(CONFIG.emptyLineDelay);
+      } else {
+        await typeLine(raw, content, cursor);
+        await sleep(CONFIG.lineDelay);
+      }
+    }
+
+    /* оставляем мигающий курсор в конце последней строки */
+    const last = output.querySelector('.line:last-child .content');
+    if (last) {
+      if (last.textContent === '\u00a0') last.textContent = '';
+      last.appendChild(cursor);
+    }
+  }
+
+  /* ============================================================
+     ЗАГЛУШКА
+     ============================================================ */
+  function showEmpty() {
+    output.innerHTML = `
+      <div class="empty">
+        <div class="big">⤓</div>
+        <div>не найден <span class="accent">data.js</span></div>
+        <div style="font-size:12px;max-width:520px;line-height:1.7;margin-top:8px;">
+          создай рядом с index.html файл <span class="accent">data.js</span> и оберни свой текст так:
+        </div>
+        <pre style="text-align:left;color:var(--ctp-subtext0);font-size:12px;margin-top:14px;background:rgba(0,0,0,0.25);padding:14px 18px;border-radius:8px;border:1px solid var(--ctp-surface1);">window.__DATA__ = String.raw\`
+твой текст, лог или код
+вторая строка
+третья строка
+\`;</pre>
+      </div>`;
+  }
+
+  /* ============================================================
+     SKIP
+     ============================================================ */
+  function requestSkip() {
+    if (skipRequested) return;
+    skipRequested = true;
+  }
+  screenEl.addEventListener('click', requestSkip);
+  document.addEventListener('keydown', requestSkip);
+
+  /* ============================================================
+     ЗАПУСК
+     ============================================================ */
+  let linesCache = null;
+
+  async function boot() {
+    if (document.fonts && document.fonts.ready) {
+      try { await document.fonts.ready; } catch (e) {}
+    }
+
+    const raw = window.__DATA__;
+    if (typeof raw !== 'string' || !raw.length) { showEmpty(); return; }
+
+    const lines = parseLines(raw);
+    if (!lines.length) { showEmpty(); return; }
+
+    linesCache = lines;
+
+    /* 1) оценка + 2) проверка по реальному DOM */
+    await fitToScreen(lines);
+    await raf2();
+
+    await typeAll(lines);
+  }
+
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    if (!linesCache) return;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(async () => {
+      applyFontSize(linesCache);
+      await raf2();
+      /* если после ресайза текст уже отпечатан — мягко подгоняем размер */
+      if (!skipRequested && output.querySelector('.cursor')) {
+        applyFontSize(linesCache);
+      }
+    }, 120);
+  });
+
+  setTimeout(boot, 200);
+</script>
+</body>
+</html>
